@@ -1,6 +1,6 @@
 # QwenGram 0.8B
 
-This private llama.cpp copy runs the REAL-15M R=1 reader and its linear750 arbiter. It inserts the reader before Qwen3.5 decoder layers 2 and 8 (zero based), reads the 16 PLE rows for each token from an external GGUF, and evaluates the reader and gate in the model graph. The PLE is mapped on the host and only selected rows are dequantized; it is not copied to the GPU.
+This llama.cpp fork runs the REAL-15M R=1 reader and its linear750 arbiter. It inserts the reader before Qwen3.5 decoder layers 2 and 8 (zero based), reads the 16 PLE rows for each token from an external GGUF, and evaluates the reader and gate in the model graph. The PLE is mapped on the host and only selected rows are dequantized; it is not copied to the GPU. See the [model files](https://huggingface.co/Ninnix96/Qwengram-0.8B) and the [study](https://github.com/Ninnix/qwen-ple-transfer).
 
 The model GGUFs contain the Qwen3.5-0.8B backbone, two reader projections per site, trained beta and gamma values, alpha2, and the IDX8 gate. They do not contain the PLE.
 
@@ -16,7 +16,7 @@ Put these files under `models/qwengram/` (excluded from this repository's local 
 | `QwenGram-0.8B-Q4_K_M.gguf` | `77500ea47628c2a40155a4d2b6468a1a4aec4950de3bc717268704e40be52e33` |
 | `Qwen3.8-Flash-Next-PLE-Q4_1.gguf` | `66db3ab390f4dd5063ecc89cc180f4713898577682347001bf64ab8e328527a1` |
 
-The BF16, Q8_0, and Q4_K_M models are from the [private QwenGram release](https://huggingface.co/Ninnix96/Qwengram-0.8B). Q6_K was made locally from that BF16 GGUF with llama.cpp's quantizer, retaining the 11 QwenGram tensors as F32. The external PLE is [Ivan Fioravanti's Q4_1 GGUF](https://huggingface.co/ivanfioravanti/Qwen3.8-Flash-Next-DS4-Q4/blob/main/Qwen3.8-Flash-Next-PLE-Q4_1.gguf); credit and source belong to Ivan.
+The BF16, Q8_0, and Q4_K_M models are from the [QwenGram release](https://huggingface.co/Ninnix96/Qwengram-0.8B). Q6_K was made locally from that BF16 GGUF with llama.cpp's quantizer, retaining the 11 QwenGram tensors as F32. The external PLE is [Ivan Fioravanti's Q4_1 GGUF](https://huggingface.co/ivanfioravanti/Qwen3.8-Flash-Next-DS4-Q4/blob/main/Qwen3.8-Flash-Next-PLE-Q4_1.gguf); credit and source belong to Ivan.
 
 ## Build and run
 
