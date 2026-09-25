@@ -1,5 +1,11 @@
 #include "models.h"
 #include "llama-memory-recurrent.h"
+#include "llama-qwengram.h"
+#include "llama-batch.h"
+
+#include <cstdlib>
+#include <stdexcept>
+#include <vector>
 
 void llama_model_qwen35::load_arch_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,       hparams.f_norm_rms_eps);
@@ -27,6 +33,17 @@ void llama_model_qwen35::load_arch_hparams(llama_model_loader & ml) {
         case 32: type = hparams.n_embd == 2560 ? LLM_TYPE_4B : LLM_TYPE_9B; break;
         case 64: type = LLM_TYPE_27B; break;
         default: type = LLM_TYPE_UNKNOWN;
+    }
+
+    std::string version;
+    qwengram.enabled = ml.get_key("qwengram.version", version, false);
+    if (qwengram.enabled) {
+        if (version != "1" || hparams.n_layer() != 24 || hparams.n_embd != 1024) {
+            throw std::runtime_error("QwenGram: unsupported model version or dimensions");
+        }
+        const char * path = std::getenv("QWENGRAM_PLE");
+        if (!path || !*path) throw std::runtime_error("QwenGram: set QWENGRAM_PLE to Ivan's Q4_1 PLE GGUF");
+        qwengram.ple = std::make_shared<llama_qwengram_ple>(path);
     }
 }
 
@@ -121,16 +138,46 @@ void llama_model_qwen35::load_arch_tensors(llama_model_loader & ml) {
     for (int i = n_layer; i < n_layer_all; ++i) {
         load_block_mtp(i);
     }
+    if (qwengram.enabled) {
+        for (int site = 0; site < 2; ++site) {
+            const int il = site == 0 ? 2 : 8;
+            qwengram.key[site]   = create_tensor(tn(LLM_TENSOR_QWENGRAM_KEY,   "weight", il), {2560, 1024}, 0);
+            qwengram.value[site] = create_tensor(tn(LLM_TENSOR_QWENGRAM_VALUE, "weight", il), {2560, 1024}, 0);
+            qwengram.beta[site]  = create_tensor(tn(LLM_TENSOR_QWENGRAM_BETA, il), {1}, 0);
+            qwengram.gamma[site] = create_tensor(tn(LLM_TENSOR_QWENGRAM_GAMMA, il), {1}, 0);
+        }
+        qwengram.gate_w = create_tensor(tn(LLM_TENSOR_QWENGRAM_GATE_W), {1024}, 0);
+        qwengram.gate_b = create_tensor(tn(LLM_TENSOR_QWENGRAM_GATE_B), {1}, 0);
+        qwengram.alpha2 = create_tensor(tn(LLM_TENSOR_QWENGRAM_ALPHA2), {1}, 0);
+    }
 }
 
 std::unique_ptr<llm_graph_context> llama_model_qwen35::build_arch_graph(const llm_graph_params & params) const {
     if (params.gtype == LLM_GRAPH_TYPE_DECODER_MTP) {
+        if (qwengram.enabled) throw std::runtime_error("QwenGram: MTP graph is unsupported");
         return std::make_unique<graph_mtp>(*this, params);
     }
     return std::make_unique<graph>(*this, params);
 }
 
-llama_model_qwen35::graph::graph(const llama_model & model, const llm_graph_params & params) :
+class llm_graph_input_qwengram : public llm_graph_input_i {
+public:
+    llm_graph_input_qwengram(const llama_qwengram_ple & ple, llama_qwengram_state & state, ggml_tensor * tensor) :
+        ple(ple), state(state), tensor(tensor) {}
+
+    void set_input(const llama_ubatch * ubatch) override {
+        std::vector<float> data(2560 * ubatch->n_tokens);
+        ple.fill(*ubatch, state, data.data());
+        ggml_backend_tensor_set(tensor, data.data(), 0, data.size() * sizeof(float));
+    }
+
+private:
+    const llama_qwengram_ple & ple;
+    llama_qwengram_state & state;
+    ggml_tensor * tensor;
+};
+
+llama_model_qwen35::graph::graph(const llama_model_qwen35 & model, const llm_graph_params & params) :
     llm_build_delta_net_base(params), model(model) {
     const int64_t n_embd_head = hparams.n_embd_head_v();
 
@@ -151,8 +198,20 @@ llama_model_qwen35::graph::graph(const llama_model & model, const llm_graph_para
     ggml_tensor * inp_pos     = build_inp_pos();
     ggml_tensor * inp_out_ids = build_inp_out_ids();
 
+    ggml_tensor * qwengram_memory = nullptr;
+    if (model.qwengram.enabled) {
+        if (!params.qwengram_state) throw std::runtime_error("QwenGram: sequence state unavailable");
+        qwengram_memory = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 2560, ubatch.n_tokens);
+        ggml_set_name(qwengram_memory, "qwengram_memory");
+        ggml_set_input(qwengram_memory);
+        res->add_input(std::make_unique<llm_graph_input_qwengram>(*model.qwengram.ple, *params.qwengram_state, qwengram_memory));
+    }
+
     // MTP/NextN layers are loaded as extra decoder blocks but not executed in the main pass.
     for (int il = 0; il < n_layer; ++il) {
+        if (qwengram_memory && (il == 2 || il == 8)) {
+            inpL = build_qwengram_reader(inpL, qwengram_memory, il == 2 ? 0 : 1);
+        }
         res->t_layer_inp[il] = inpL;
 
         ggml_tensor * inpSA = inpL;
@@ -222,6 +281,27 @@ llama_model_qwen35::graph::graph(const llama_model & model, const llm_graph_para
     res->t_logits = cur;
 
     ggml_build_forward_expand(gf, cur);
+}
+
+ggml_tensor * llama_model_qwen35::graph::build_qwengram_reader(ggml_tensor * h, ggml_tensor * memory, int site) const {
+    const auto & qg = model.qwengram;
+    ggml_tensor * h32 = ggml_cast(ctx0, h, GGML_TYPE_F32);
+    ggml_tensor * q = ggml_rms_norm(ctx0, h32, 1e-6f);
+    ggml_tensor * k = ggml_rms_norm(ctx0, ggml_mul_mat(ctx0, qg.key[site], memory), 1e-6f);
+    ggml_tensor * score = ggml_sum_rows(ctx0, ggml_mul(ctx0, q, k));
+    score = ggml_scale(ctx0, score, 1.0f / 32.0f);
+    ggml_tensor * gate = ggml_sigmoid(ctx0, ggml_add(ctx0, score, qg.beta[site]));
+    ggml_tensor * alpha = qg.alpha2;
+    if (site == 1) {
+        ggml_tensor * w = ggml_reshape_2d(ctx0, qg.gate_w, 1024, 1);
+        alpha = ggml_mul_mat(ctx0, w, q);
+        alpha = ggml_scale(ctx0, ggml_sigmoid(ctx0, ggml_add(ctx0, alpha, qg.gate_b)), 0.5f);
+    }
+    ggml_tensor * value = ggml_mul_mat(ctx0, qg.value[site], memory);
+    ggml_tensor * delta = ggml_mul(ctx0, value, gate);
+    delta = ggml_mul(ctx0, delta, qg.gamma[site]);
+    delta = ggml_mul(ctx0, delta, alpha);
+    return ggml_cast(ctx0, ggml_add(ctx0, h32, delta), h->type);
 }
 
 std::pair<ggml_tensor *, ggml_tensor *> llama_model_qwen35::graph::build_qkvz(

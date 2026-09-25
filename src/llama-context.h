@@ -4,6 +4,7 @@
 #include "llama-ext.h"
 #include "llama-cparams.h"
 #include "llama-graph.h"
+#include "llama-qwengram.h"
 #include "llama-adapter.h"
 #include "llama-impl.h"
 #include "llama-memory.h"
@@ -377,6 +378,7 @@ private:
     llm_graph_result_ptr gf_res_reserve;
 
     llm_graph_result * gf_res_prev_active = nullptr;
+    mutable llama_qwengram_state qwengram_state;
 
     // host buffer for the model output (logits and embeddings)
     ggml_backend_buffer_ptr buf_output;

@@ -17,6 +17,8 @@ static inline ggml_tensor * build_gdn_l2_norm(ggml_context * ctx, ggml_tensor * 
     return ggml_scale(ctx, ggml_rms_norm(ctx, x, eps/n), 1.0f/sqrtf(n));
 }
 
+class llama_qwengram_ple;
+
 //
 // base classes
 //
@@ -2338,9 +2340,22 @@ struct llama_model_qwen35 : public llama_model_base {
     void load_arch_hparams(llama_model_loader & ml) override;
     void load_arch_tensors(llama_model_loader & ml) override;
 
+    struct {
+        bool enabled = false;
+        std::shared_ptr<llama_qwengram_ple> ple;
+        ggml_tensor * key[2] = {};
+        ggml_tensor * value[2] = {};
+        ggml_tensor * beta[2] = {};
+        ggml_tensor * gamma[2] = {};
+        ggml_tensor * gate_w = nullptr;
+        ggml_tensor * gate_b = nullptr;
+        ggml_tensor * alpha2 = nullptr;
+    } qwengram;
+
     struct graph : public llm_build_delta_net_base {
-        graph(const llama_model & model, const llm_graph_params & params);
+        graph(const llama_model_qwen35 & model, const llm_graph_params & params);
     private:
+        ggml_tensor * build_qwengram_reader(ggml_tensor * h, ggml_tensor * memory, int site) const;
         ggml_tensor * build_layer_attn(
         llm_graph_input_attn_kv * inp_attn,
                     ggml_tensor * cur,
@@ -2368,7 +2383,7 @@ struct llama_model_qwen35 : public llama_model_base {
                     ggml_tensor * input,
                             int   il);
 
-        const llama_model & model;
+        const llama_model_qwen35 & model;
     };
 
     struct graph_mtp : public llm_graph_context {

@@ -1,5 +1,7 @@
 # llama.cpp
 
+This private mirror adds [QwenGram 0.8B inference](docs/qwengram.md) with an external PLE GGUF and IDX2/IDX8 readers. The upstream project is [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
 
 <div align="center">

@@ -527,6 +527,13 @@ enum llm_tensor {
     LLM_TENSOR_SSM_OUT,
     LLM_TENSOR_SSM_BETA_ALPHA,      // qwen3next
     LLM_TENSOR_SSM_ALPHA,           // qwen3.5
+    LLM_TENSOR_QWENGRAM_KEY,
+    LLM_TENSOR_QWENGRAM_VALUE,
+    LLM_TENSOR_QWENGRAM_BETA,
+    LLM_TENSOR_QWENGRAM_GAMMA,
+    LLM_TENSOR_QWENGRAM_GATE_W,
+    LLM_TENSOR_QWENGRAM_GATE_B,
+    LLM_TENSOR_QWENGRAM_ALPHA2,
     // Kimi Linear KDA (using SSM_ prefix for consistency)
     LLM_TENSOR_SSM_CONV1D_Q,        // kimi: Q conv1d weight
     LLM_TENSOR_SSM_CONV1D_K,        // kimi: K conv1d weight

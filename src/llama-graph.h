@@ -94,6 +94,7 @@ struct llama_cross {
 };
 
 struct llm_graph_params;
+struct llama_qwengram_state;
 
 //
 // llm_graph_input
@@ -787,6 +788,7 @@ struct llm_graph_params {
     const llama_adapter_loras    * loras;
     const llama_memory_context_i * mctx;
     const llama_cross            * cross;
+    llama_qwengram_state          * qwengram_state;
 
     const llama_prec_policy * prec_policy = nullptr;
 
